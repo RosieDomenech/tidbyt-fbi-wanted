@@ -55,4 +55,4 @@ pixlet push \
 
 ## Data Source
 
-Official [FBI Most Wanted API](https://api.fbi.gov/wanted/v1/list) — free and public, no registration required.
+Official [FBI Most Wanted API](https://api.fbi.gov/wanted/v1/list) This is a free and public, no registration required.

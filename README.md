@@ -2,7 +2,7 @@
 
 **Author:** Rosie Domenech  
 **Date:** April 2026  
-**Description:** Live FBI Most Wanted ticker on your Tidbyt 64x32 LED display. Powered by the official FBI public API — no API key required.
+**Description:** Live FBI Most Wanted ticker on your Tidbyt 64x32 LED display. Powered by the official FBI public API (no API key required).
 
 ---
 

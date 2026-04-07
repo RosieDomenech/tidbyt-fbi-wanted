@@ -1,8 +1,8 @@
-# FBI Most Wanted Ticker
+# FBI Most Wanted Ticker — Blue & Gold Edition
 # Author: Rosie Domenech
 # Date: April 2026
-# Description: Scrolls live FBI Most Wanted persons from the official
-#              FBI public API on your Tidbyt 64x32 display.
+# Description: Live FBI Most Wanted ticker with classic FBI blue & gold colors.
+#              Reward amount drives color brightness — higher reward = brighter gold.
 
 load("cache.star", "cache")
 load("encoding/json.star", "json")
@@ -11,20 +11,39 @@ load("render.star", "render")
 load("schema.star", "schema")
 
 FBI_API   = "https://api.fbi.gov/wanted/v1/list"
-CACHE_KEY = "fbiwanted_v1"
-CACHE_TTL = 3600  # 1 hour
+CACHE_KEY = "fbiwanted_v2"
+CACHE_TTL = 3600
 
-BLACK  = "#000000"
-WHITE  = "#FFFFFF"
-RED    = "#FF2222"
-YELLOW = "#FFD700"
-ORANGE = "#FF8800"
-GRAY   = "#AAAAAA"
-DKRED  = "#1A0000"
-GREEN  = "#00CC44"
+# FBI Blue palette
+NAVY       = "#003087"   # deep FBI navy — header bg
+BLUE       = "#0044CC"   # mid blue
+BLUE_LT    = "#2266FF"   # lighter blue — divider
+
+# Gold palette — brightness by reward
+GOLD_DIM   = "#887700"   # no reward
+GOLD_LOW   = "#BBAA00"   # < $25K
+GOLD_MID   = "#FFD700"   # $25K–$100K
+GOLD_HIGH  = "#FFE84D"   # $100K–$500K
+GOLD_MAX   = "#FFFFFF"   # $500K+ (white hot)
+
+WHITE      = "#FFFFFF"
+BLACK      = "#000000"
+SILVER     = "#CCCCDD"
+RED        = "#FF3333"   # armed & dangerous only
+
+def reward_color(reward_max):
+    """Return gold color based on reward amount."""
+    if reward_max >= 500000:
+        return GOLD_MAX
+    if reward_max >= 100000:
+        return GOLD_HIGH
+    if reward_max >= 25000:
+        return GOLD_MID
+    if reward_max > 0:
+        return GOLD_LOW
+    return GOLD_DIM
 
 def strip_html(text):
-    """Remove basic HTML tags from text."""
     out = ""
     inside = False
     for c in text.elems():
@@ -35,6 +54,15 @@ def strip_html(text):
         elif not inside:
             out = out + c
     return out.strip()
+
+def format_reward(reward_max):
+    if reward_max >= 1000000:
+        return "$%dM" % (reward_max // 1000000)
+    if reward_max >= 1000:
+        return "$%dK" % (reward_max // 1000)
+    if reward_max > 0:
+        return "$%d" % reward_max
+    return ""
 
 def get_wanted(max_items, category):
     cache_key = CACHE_KEY + "_" + category
@@ -47,93 +75,88 @@ def get_wanted(max_items, category):
         url = FBI_API + "?field_offices=" + category
 
     resp = http.get(url, ttl_seconds = CACHE_TTL, headers = {
-        "User-Agent": "tidbyt-fbiwanted/1.0",
+        "User-Agent": "tidbyt-fbiwanted/2.0",
     })
 
     if resp.status_code != 200:
-        return [{"name": "FBI API unavailable", "charges": "", "reward": "", "armed": False}]
+        return [{"name": "FBI API unavailable", "charges": "", "reward_max": 0, "reward_str": "", "armed": False, "caution": ""}]
 
     data  = json.decode(resp.body())
     items = data.get("items", [])
 
     wanted = []
     for item in items:
-        name    = item.get("title", "Unknown") or "Unknown"
-        caution = strip_html(item.get("caution", "") or "")
-        subjects = item.get("subjects", []) or []
-        charges = subjects[0] if subjects else ""
+        name       = item.get("title", "Unknown") or "Unknown"
+        subjects   = item.get("subjects", []) or []
+        charges    = subjects[0] if subjects else ""
         reward_max = item.get("reward_max", 0) or 0
-        reward_text = ""
-        if reward_max > 0:
-            if reward_max >= 1000000:
-                reward_text = "$%dM reward" % (reward_max // 1000000)
-            else:
-                reward_text = "$%dK reward" % (reward_max // 1000)
-
-        warning = item.get("warning_message", "") or ""
-        armed   = "ARMED" in warning.upper() or "DANGEROUS" in warning.upper()
+        reward_str = format_reward(reward_max)
+        warning    = item.get("warning_message", "") or ""
+        armed      = "ARMED" in warning.upper() or "DANGEROUS" in warning.upper()
+        caution    = strip_html(item.get("caution", "") or "")
 
         wanted.append({
-            "name":    name,
-            "charges": charges,
-            "reward":  reward_text,
-            "armed":   armed,
-            "caution": caution[:120] if caution else charges,
+            "name":       name,
+            "charges":    charges,
+            "reward_max": reward_max,
+            "reward_str": reward_str,
+            "armed":      armed,
+            "caution":    caution[:120] if caution else charges,
         })
 
         if len(wanted) >= max_items:
             break
 
     if not wanted:
-        return [{"name": "No wanted persons found", "charges": "", "reward": "", "armed": False, "caution": ""}]
+        return [{"name": "No results found", "charges": "", "reward_max": 0, "reward_str": "", "armed": False, "caution": ""}]
 
     cache.set(cache_key, json.encode(wanted), ttl_seconds = CACHE_TTL)
     return wanted
 
 def person_screen(person):
-    armed   = person.get("armed", False)
-    name    = person.get("name", "Unknown")
-    charges = person.get("charges", "")
-    reward  = person.get("reward", "")
-    caution = person.get("caution", "") or charges
+    name       = person.get("name", "Unknown")
+    charges    = person.get("charges", "")
+    reward_max = person.get("reward_max", 0)
+    reward_str = person.get("reward_str", "")
+    armed      = person.get("armed", False)
+    caution    = person.get("caution", "") or charges
 
-    # Build ticker line
+    gold = reward_color(reward_max)
+
+    # Name color: white if max reward, gold otherwise, red if armed
+    name_color = RED if armed else gold
+
+    # Build scrolling ticker
     parts = []
     if charges:
         parts.append(charges)
-    if reward:
-        parts.append(reward)
+    if reward_str:
+        parts.append("Reward: " + reward_str)
     if armed:
-        parts.append("⚠ ARMED & DANGEROUS")
+        parts.append("ARMED & DANGEROUS")
     if caution and caution != charges:
         parts.append(caution)
     ticker = "  //  ".join(parts) if parts else name
 
-    name_color   = RED if armed else ORANGE
-    header_color = DKRED if armed else "#1A0A00"
-    bar_color    = RED if armed else YELLOW
-
     return render.Column(
         children = [
-            # ── Header ───────────────────────────────
+            # ── Header — FBI Navy ────────────────────
             render.Box(
                 width  = 64,
                 height = 11,
-                color  = header_color,
+                color  = NAVY,
                 child  = render.Column(
                     children = [
+                        # "FBI MOST WANTED" in gold
                         render.Padding(
                             pad   = (2, 1, 0, 0),
-                            child = render.Row(
-                                children = [
-                                    render.Text(
-                                        content = "FBI MOST WANTED",
-                                        font    = "CG-pixel-3x5-mono",
-                                        color   = WHITE,
-                                    ),
-                                ],
+                            child = render.Text(
+                                content = "FBI MOST WANTED",
+                                font    = "CG-pixel-3x5-mono",
+                                color   = gold,
                             ),
                         ),
+                        # Name scrolling
                         render.Padding(
                             pad   = (2, 1, 0, 0),
                             child = render.Marquee(
@@ -150,13 +173,13 @@ def person_screen(person):
                     ],
                 ),
             ),
-            # ── Divider ──────────────────────────────
-            render.Box(width = 64, height = 1, color = bar_color),
-            # ── Scrolling details ─────────────────────
+            # ── Gold divider ─────────────────────────
+            render.Box(width = 64, height = 1, color = gold),
+            # ── Scrolling details on navy ─────────────
             render.Box(
                 width  = 64,
                 height = 20,
-                color  = BLACK,
+                color  = "#001155",
                 child  = render.Padding(
                     pad   = (0, 4, 0, 0),
                     child = render.Marquee(
@@ -165,7 +188,7 @@ def person_screen(person):
                         offset_end   = 64,
                         child        = render.Text(
                             content = ticker,
-                            color   = YELLOW if armed else WHITE,
+                            color   = gold,
                         ),
                     ),
                 ),
